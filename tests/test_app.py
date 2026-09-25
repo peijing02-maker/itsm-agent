@@ -1,5 +1,6 @@
 """UI flow: plan shown first, tool steps shown, approval card, approve -> answer (scripted LLM)."""
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -41,3 +42,27 @@ def test_plan_then_execution_then_approval(db: Path, monkeypatch: pytest.MonkeyP
     assert not at.exception
     assert server.check_service("cache")["status"] == "healthy"
     assert "Cache restarted" in " ".join(m.value for m in at.markdown)
+
+
+def test_new_chat_starts_fresh_but_keeps_long_term_memory(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    llm = ScriptedLLM(scripts={"planner": [say("plan 1"), say("plan 2")],
+                               "main": [say("First answer."), say("Second answer.")]})
+    agent = ServiceDeskAgent(llm, db)
+    asyncio.run(agent.memory.add_lesson("Page app-team for cache problems", "they own it"))
+    at = AppTest.from_file(APP, default_timeout=60)
+    at.session_state["agent"] = agent
+    at.session_state["thread"] = "first"
+    at.session_state["history"] = []
+    at.session_state["pending"] = []
+    at.run()
+    at.chat_input[0].set_value("How is the cache?").run()
+    assert "First answer." in " ".join(m.value for m in at.markdown)
+
+    next(b for b in at.button if "New chat" in b.label).click().run()
+    assert not at.exception
+    assert at.session_state["thread"] != "first" and at.session_state["history"] == []
+    assert "First answer." not in " ".join(m.value for m in at.markdown)  # the chat is fresh
+    assert "Page app-team" in " ".join(m.value for m in at.markdown)  # sidebar still shows long-term memory
+    at.chat_input[0].set_value("And now?").run()
+    assert "Page app-team" in llm.prompts("main")[-1]  # and still used in the new chat

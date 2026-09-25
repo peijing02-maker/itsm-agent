@@ -41,6 +41,11 @@ class ScriptedLLM(BaseChatModel):
 
     scripts: dict[str, list[AIMessage]]
     _pos: dict[str, int] = PrivateAttr(default_factory=dict)
+    _prompts: list[tuple[str, str]] = PrivateAttr(default_factory=list)  # (agent, system prompt) per call
+
+    def prompts(self, agent: str) -> list[str]:
+        """System prompts this agent was called with, in order."""
+        return [text for who, text in self._prompts if who == agent]
 
     @property
     def _llm_type(self) -> str:
@@ -52,11 +57,20 @@ class ScriptedLLM(BaseChatModel):
     def _generate(self, messages: list[BaseMessage], stop: Any = None, run_manager: Any = None, **kw: Any) -> ChatResult:
         system = next((m.text for m in messages if isinstance(m, SystemMessage)), "")
         agent = next(a for marker, a in AGENT_MARKERS.items() if marker in system)
+        self._prompts.append((agent, system))
         i = self._pos.get(agent, 0)
         self._pos[agent] = i + 1
         script = self.scripts.get(agent, [])
         msg = script[i] if i < len(script) else say("(script exhausted)")
         return ChatResult(generations=[ChatGeneration(message=msg)])
+
+
+@pytest.fixture(autouse=True)
+def memory_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Every test gets its own long-term memory; tests never touch data/memory.db."""
+    path = tmp_path / "memory.db"
+    monkeypatch.setenv("ITSM_MEMORY_DB_PATH", str(path))
+    return path
 
 
 @pytest.fixture

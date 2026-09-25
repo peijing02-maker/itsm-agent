@@ -127,7 +127,7 @@ What changed:
 | **Tools (actions)** | Act on the environment | MCP tools + real internet tools |
 | **Environment** | The world the agent perceives and changes | SQLite IT system + the internet |
 | **Planning** | Break goals into steps | Explicit planner step (plan-and-execute), shown to the user first, then adapted during the ReAct loop |
-| **Memory** | Keep context | Short-term: checkpointer per thread. Long-term: skills (procedural knowledge) and the knowledge base |
+| **Memory** | Keep context, learn | Short-term: checkpointer per thread. Long-term (deepagents `StoreBackend` + `MemoryMiddleware`): human-approved lessons in every prompt, past incidents searched on demand. Plus skills and the knowledge base |
 | **Orchestration** | Run the loop; coordinate agents | LangChain / LangGraph agent loop; subagents as tools |
 | **Guardrails** | Keep autonomy safe | Human-in-the-loop, read-only SQL, tool-call caps, Jev injection flag, injection-aware prompts |
 | **Fast decisions (System One)** | Typed, calibrated classification | Jev: team, impact, urgency, injection, with a confidence each |
@@ -155,6 +155,7 @@ limit), cost and latency (small subagent contexts, skills loaded only on demand)
 | | `tests/test_jev.py` | **fake Jev client** | Priority matrix is code. One Jev request returns four typed answers. No personal data is sent. Low confidence or injection goes to human review. LLM fallback works. Tool reads tickets via MCP and rejects bad ids. |
 | | `tests/test_skills.py` | none | Skills are discoverable; only descriptions go in the prompt, and the full text loads on demand. |
 | 2. Agent behaviour | `tests/test_agent.py`, `tests/test_app.py` | **scripted fake** | The real LangChain graph with real MCP: the plan is streamed before any tool runs, subagent steps are streamed, write actions **pause until approved**, tool-call caps stop runaway subagents, simple questions use one direct tool, rejected actions never run, skills load on demand, memory works within a thread, injection cannot bypass approval, and the UI flow works (plan, steps, approval card, answer). |
+| | `tests/test_memory.py` | **scripted fake** | Memory survives a restart; poisoned, oversized and duplicate writes are refused; lessons are capped; parallel writes keep every lesson; incidents are found by relevance. In the agent: nothing is remembered before approval; an approved lesson reaches the planner and executor of *other open sessions*; `it_diagnostics` reuses a past incident; the fix and the memory write are approved separately. |
 | 3. End to end | `tests/test_scenarios.py` | **real** (`-m live`) | Real tasks: the root cause is fixed and the ticket resolved, it investigated *before* acting, real internet checks were used, the injection was ignored, and rejections were respected. |
 
 Testing a non-deterministic system:
@@ -167,5 +168,6 @@ Testing a non-deterministic system:
 ## 9. Limitations and next steps
 
 - The IT system is simulated. A ServiceNow or Jira MCP server would plug in with no agent changes.
-- Long-term memory: store resolved incidents and retrieve similar ones (RAG).
+- Long-term memory: move incident search to a store with an embedding index (semantic search) as history grows;
+  per-operator memory once the UI has sign-in; feed triage corrections back into Jev's LLM fallback.
 - Tracing with LangSmith, and CI running levels 1–2 on every commit.

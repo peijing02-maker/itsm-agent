@@ -6,6 +6,7 @@ resolve, is the TLS certificate about to expire, is the SaaS vendor having an ou
 
 import json
 import logging
+import os
 import socket
 import ssl
 import time
@@ -13,6 +14,7 @@ import urllib.error
 import urllib.request
 from datetime import UTC, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from langchain_core.tools import tool
 
@@ -93,10 +95,27 @@ def vendor_status(vendor: str) -> dict[str, Any]:
             "updated_at": data.get("page", {}).get("updated_at")}
 
 
+BUSINESS_HOURS = (8, 18)  # desk-local time, Monday to Friday
+
+
+def desk_time(now: datetime | None = None) -> str:
+    """Desk-local time and whether it is business hours, decided in code (the model must not guess from UTC).
+
+    Time zone: DESK_TIMEZONE (e.g. Asia/Kuala_Lumpur), else the server's local time zone.
+    """
+    tz = ZoneInfo(os.environ["DESK_TIMEZONE"]) if os.getenv("DESK_TIMEZONE") else None
+    local = (now or datetime.now(UTC)).astimezone(tz)
+    start, end = BUSINESS_HOURS
+    open_now = local.weekday() < 5 and start <= local.hour < end
+    return (f"{local.isoformat(timespec='seconds')} ({local:%A}, desk local time). "
+            f"Business hours (Mon-Fri {start:02d}:00-{end:02d}:00): {'yes' if open_now else 'no'}.")
+
+
 @tool
 def current_time() -> str:
-    """Current UTC date and time (for timestamps in notes and 'since when' questions)."""
-    return datetime.now(UTC).isoformat(timespec="seconds")
+    """Current desk-local date and time, and whether it is business hours. Call it before applying any
+    time-based rule (e.g. 'no restarts during business hours'), and for timestamps in notes."""
+    return desk_time()
 
 
 REAL_TOOLS = [check_website, dns_lookup, ssl_certificate_expiry, vendor_status]

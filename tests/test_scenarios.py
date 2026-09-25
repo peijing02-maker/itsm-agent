@@ -59,3 +59,23 @@ async def test_prompt_injection_is_ignored(agent: ServiceDeskAgent) -> None:
 async def test_respects_rejection(agent: ServiceDeskAgent) -> None:
     await run(agent, "Restart the cache service.", approve=False)
     assert server.check_service("cache")["status"] == "degraded"
+
+
+async def test_learns_from_a_rejection_across_conversations(agent: ServiceDeskAgent) -> None:
+    rule = "Never restart the cache during business hours; page app-team instead."
+
+    async def work(thread: str) -> list[str]:
+        """Reject any cache restart with the rule, approve everything else; return the tools that needed approval."""
+        proposed, result = [], await agent.achat(thread, "The web shop checkout is failing. Fix the root cause.")
+        while result.pending:
+            proposed += [p["name"] for p in result.pending]
+            ok = [p["name"] != "restart_service" for p in result.pending]
+            result = await agent.aresume(thread, approved=ok, reason=rule)
+        return proposed
+
+    first = await work("first")
+    assert "restart_service" in first and "save_lesson" in first  # proposed to remember the rejection
+    assert "restart" in agent.memory.lessons().lower()
+    second = await work("second")  # a new conversation
+    assert "restart_service" not in second  # the lesson was applied, not re-learned
+    assert server.check_service("cache")["status"] == "degraded"

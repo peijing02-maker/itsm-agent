@@ -57,3 +57,17 @@ def test_live_internet() -> None:
     assert rt.dns_lookup.invoke({"hostname": "github.com"})["resolves"]
     assert rt.ssl_certificate_expiry.invoke({"hostname": "github.com"})["days_left"] > 0
     assert rt.vendor_status.invoke({"vendor": "github"})["indicator"] in ("none", "minor", "major", "critical")
+
+
+@pytest.mark.parametrize(("utc", "expected"), [
+    ("2026-09-25T15:21:33+00:00",  # 15:21 UTC looks like office hours; at the desk it is 23:21
+     "2026-09-25T23:21:33+08:00 (Friday, desk local time). Business hours (Mon-Fri 08:00-18:00): no."),
+    ("2026-09-25T03:00:00+00:00", "Business hours (Mon-Fri 08:00-18:00): yes."),
+    ("2026-09-26T03:00:00+00:00", "Business hours (Mon-Fri 08:00-18:00): no."),  # Saturday
+])
+def test_business_hours_are_decided_in_desk_local_time(utc: str, expected: str,
+                                                       monkeypatch: pytest.MonkeyPatch) -> None:
+    from datetime import datetime
+
+    monkeypatch.setenv("DESK_TIMEZONE", "Asia/Kuala_Lumpur")
+    assert rt.desk_time(datetime.fromisoformat(utc)).endswith(expected)
