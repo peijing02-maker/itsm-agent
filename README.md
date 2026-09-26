@@ -2,7 +2,7 @@
 
 An **agentic AI** system built with **LangChain**. An IT service-desk agent works tickets end to end:
 - as soon as you ask, it replies with how it understood the request and its plan, then shows every step live;
-- it answers simple questions with one direct lookup, and triages tickets with **Jev** (typed, calibrated decisions);
+- it answers simple questions with one direct lookup, and triages tickets with a typed LLM classifier (structured output, confidence per decision);
 - it tracks multi-step work as a **live plan checklist** it revises when evidence changes;
 - it delegates investigation to **subagents**, in parallel when useful (internal diagnostics, change analysis, internet);
 - it reads internal systems through an **MCP server**;
@@ -23,7 +23,7 @@ agent/critic.py            change critic: structured second opinion on every fix
 agent/memory.py            long-term memory on deepagents: lessons in every prompt, past incidents on demand
 agent/real_tools.py        real internet tools: website check, DNS, TLS expiry, vendor status
 agent/skills.py            skill loader (progressive disclosure)
-agent/jev.py               Jev (TypeSafe System One) typed ticket triage + LLM fallback
+agent/triage.py            typed LLM ticket triage (priority and review rules in code)
 skills/*/SKILL.md          incident-triage, root-cause-analysis, major-incident, outage-communication
 mcp_server/server.py       MCP server: tickets, services, changes, metrics, logs, KB, SQL, fixes, pages
 mcp_server/scenarios.py    demo worlds: cache-outage, major-incident
@@ -50,7 +50,7 @@ see full tool results.
 ## Test
 
 ```bash
-pytest            # 73 tests, scripted fake LLM + fake Jev, no API key, ~20 s
+pytest            # 73 tests, scripted fake LLM, no API key, ~20 s
 pytest -m live    # real internet checks + end-to-end scenarios with the real LLM
 ```
 

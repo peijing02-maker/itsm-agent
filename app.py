@@ -39,7 +39,7 @@ EXAMPLES = {
     ],
 }
 LABELS = {"it_diagnostics": "🕵️ subagent", "change_analyst": "🔀 subagent", "internet_checker": "🌐 subagent",
-          "load_skill": "📘 skill", "jev_triage": "⚡ Jev",
+          "load_skill": "📘 skill", "triage_tickets": "⚡ triage",
           "get_ticket": "🔎 MCP read", "list_tickets": "🔎 MCP read", "check_service": "🔎 MCP read",
           "run_sql": "🔎 MCP read", "list_changes": "🔎 MCP read", "get_metrics": "🔎 MCP read",
           "get_logs": "🔎 MCP read", "search_knowledge_base": "🔎 MCP read",
@@ -142,13 +142,6 @@ agent: ServiceDeskAgent = st.session_state.agent
 with st.sidebar:
     st.title("🛠️ Service Desk Agent")
     st.caption(f"LangChain · plan-and-execute · model `{os.getenv('OPENAI_MODEL', 'gpt-5.5')}`")
-    jev = agent.jev
-    if jev is not None and jev.disabled_reason:
-        st.warning(f"Jev: {jev.disabled_reason} → using LLM fallback")
-    elif os.getenv("TYPESAFE_API_KEY"):
-        st.caption("Jev: TypeSafe System One ✅")
-    else:
-        st.caption("Jev: no TYPESAFE_API_KEY → LLM fallback")
     st.button("➕ New chat", on_click=new_chat, type="primary", use_container_width=True,
               help="Start a new conversation. Long-term memory (lessons, past incidents) carries over.")
     st.caption(f"Chat `{st.session_state.thread[:8]}`")
@@ -164,7 +157,7 @@ with st.sidebar:
     with st.expander("Architecture"):
         st.markdown(
             "1. **Plan** – restate the request, list the steps; multi-step plans become a live checklist\n"
-            "2. **Execute** – direct lookups for simple questions; **Jev** for typed triage; "
+            "2. **Execute** – direct lookups for simple questions; typed LLM triage; "
             "subagents (in parallel) for multi-step work\n"
             "   - `it_diagnostics`: internal systems via **MCP** (read-only)\n"
             "   - `change_analyst`: what changed vs. when symptoms began\n"

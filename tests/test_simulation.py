@@ -129,8 +129,8 @@ def test_judge_passes_only_if_every_connected_service_stays_healthy() -> None:
 
 
 def test_plan_steps_seed_todos_only_for_multi_step_plans() -> None:
-    plan = "**Plan:** To do this, I need to:\n1. Triage with jev_triage\n2) Investigate\n 3. Fix (approval)\nDone."
-    assert plan_steps(plan) == ("Triage with jev_triage", "Investigate", "Fix (approval)")
+    plan = "**Plan:** To do this, I need to:\n1. Triage with triage_tickets\n2) Investigate\n 3. Fix (approval)\nDone."
+    assert plan_steps(plan) == ("Triage with triage_tickets", "Investigate", "Fix (approval)")
     todos = seed_todos(plan_steps(plan))
     assert [t["status"] for t in todos] == ["in_progress", "pending", "pending"]
     assert seed_todos(("One step",) * (MIN_STEPS_FOR_TODOS - 1)) == []

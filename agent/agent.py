@@ -52,7 +52,7 @@ from langgraph.types import Command
 
 from agent.control import ActionGateMiddleware, VerificationMiddleware, is_answered
 from agent.critic import CriticMiddleware, approval_note
-from agent.jev import JevClassifier, make_jev_triage_tool
+from agent.triage import TriageClassifier, make_triage_tool
 from agent.logging_config import preview
 from agent.memory import MEMORY_WRITE_TOOLS, AgentMemory
 from agent.planning import TurnContext, plan_steps, planning_middleware
@@ -72,7 +72,7 @@ NOTES_TOOLS = ["ls", "read_file", "write_file", "edit_file"]  # virtual filesyst
 
 CAPABILITIES = f"""Your toolbox:
 - get_ticket, list_tickets, check_service, run_sql: direct read-only lookups for simple questions (1 call).
-- jev_triage (Jev typed classifier): team, priority and prompt-injection flag for tickets, in one call.
+- triage_tickets (typed classifier): team, priority and prompt-injection flag for tickets, in one call.
 - task: delegate to a specialist subagent. Several task calls in ONE step run in parallel.
     it_diagnostics: internal investigation (health, dependency chain, logs, knowledge base, past incidents).
     change_analyst: what changed (deploys and config changes vs. when the symptoms started).
@@ -113,7 +113,7 @@ The conversation already contains your plan for the latest request. Execute it:
 1. Do exactly what was asked. A question gets an answer, not an action: never fix or update anything
    unless the user asked to fix, resolve or change something.
 2. Be efficient; every call costs time. Simple facts: one direct lookup (get_ticket, check_service, run_sql).
-   Triage: jev_triage with all ticket ids in one call. Root-cause work: delegate with task and a precise brief.
+   Triage: triage_tickets with all ticket ids in one call. Root-cause work: delegate with task and a precise brief.
    When a recent change may be the cause or several services fail, run it_diagnostics and change_analyst in
    parallel (two task calls in one step). Real websites/vendors: internet_checker. Never re-check what you know.
 3. Load a skill when a step matches it; skills contain the team's procedures.
@@ -188,7 +188,6 @@ class ServiceDeskAgent:
         self.checkpointer = InMemorySaver()  # short-term memory, survives across turns of a thread
         self.memory = memory or AgentMemory.open()  # long-term memory, shared by all threads, survives restarts
         self.graph: Any = None
-        self.jev: JevClassifier | None = None
         self._shown_calls: set[str] = set()  # LangGraph re-emits a call on resume; show it once
         self._delegations: dict[str, str] = {}  # task tool_call_id -> subagent name
         self._subagent_ns: dict[str, str] = {}  # stream namespace of a running task -> subagent name
@@ -201,10 +200,9 @@ class ServiceDeskAgent:
         log.info("MCP server connected: %d tools %s", len(mcp_tools), sorted(mcp_tools))
         search_incidents = self.memory.search_tool()
         pool = {**mcp_tools, search_incidents.name: search_incidents, **{t.name: t for t in REAL_TOOLS}}
-        self.jev = JevClassifier(fallback_model=self.model)
         tools = [
             *(mcp_tools[n] for n in DIRECT_READ_TOOLS),
-            make_jev_triage_tool(self.jev, mcp_tools["get_ticket"]),
+            make_triage_tool(TriageClassifier(self.model), mcp_tools["get_ticket"]),
             *(mcp_tools[n] for n in WRITE_TOOLS),
             search_incidents,
             *self.memory.write_tools(),

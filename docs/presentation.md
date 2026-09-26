@@ -45,7 +45,7 @@ and resolve it") and it works autonomously:
 | **MCP** | Tools served over the Model Context Protocol. The server is framework-independent and could also be used by Claude Desktop, Cursor or other clients. | `mcp_server/server.py` |
 | **Skills** | Procedures stored as markdown. Only the name and description go in the prompt; the full text is loaded on demand. New skills need no code changes. | `skills/*/SKILL.md`, `agent/skills.py` |
 | **Real tools** | Live website check, DNS lookup, TLS certificate expiry, and SaaS vendor status (GitHub, OpenAI, Cloudflare...) | `agent/real_tools.py` |
-| **Jev (System One)** | Fast typed decisions (choice, score, yes/no) with calibrated confidence: ticket team, impact, urgency, prompt-injection flag. Priority is computed in code; low confidence goes to a human. Falls back to the LLM without a key. | `agent/jev.py` |
+| **Typed triage** | Structured-output LLM call per ticket with a confidence per decision: team, impact, urgency, prompt-injection flag. Priority is computed in code; low confidence goes to a human. | `agent/triage.py` |
 | **Human-in-the-loop** | Write tools pause the graph; the human approves or rejects | `HumanInTheLoopMiddleware` |
 | **Plan as state** | Multi-step plans become a todo list the agent revises (`write_todos`); the UI shows every version | `agent/planning.py` |
 | **Parallel subagents** | deepagents `task` tool; `it_diagnostics` and `change_analyst` run at the same time, each step attributed exactly | `agent/subagents.py` |
@@ -110,13 +110,13 @@ Measured with the real model (tool calls, LLM calls, time). Before is the first 
 |---|---|---|
 | "How many open tickets?" | 2 / 4, 9 s | **1 / 2, 4 s** |
 | "Status of the cache?" | 14 / 9, 55 s, and it *tried to restart the cache* | **1 / 2, 4 s**, no action |
-| "Triage all open tickets" | 15 / 6, 41 s | **3 / 3** (Jev triage) |
+| "Triage all open tickets" | 15 / 6, 41 s | **3 / 3** (typed triage) |
 | "Fix T-101" end to end | 24 / ~21, ~80 s | **12 / 9, ~27 s** |
 
 What changed:
 1. **Do only what was asked.** Questions get answers, not actions, and the planner scales the number of steps
    to the request.
-2. **Right tool for the job.** Simple facts use one direct MCP lookup. Triage uses one Jev call. Only multi-step
+2. **Right tool for the job.** Simple facts use one direct MCP lookup. Triage uses one triage_tickets call. Only multi-step
    root-cause work goes to a subagent. Delegating has a cost (extra LLM calls), so it should earn its place.
 3. **Efficiency rules for subagents:** stop when the evidence is enough, don't repeat searches, don't query
    history unless asked.
@@ -134,8 +134,8 @@ What changed:
 | **Planning** | Break goals into steps | Explicit planner step (plan-and-execute), shown to the user first; its steps become a todo list the agent revises (`write_todos`), forced after a failed fix |
 | **Memory** | Keep context, learn | Short-term: checkpointer per thread. Long-term (deepagents `StoreBackend` + `MemoryMiddleware`): human-approved lessons in every prompt, past incidents searched on demand. Plus skills and the knowledge base |
 | **Orchestration** | Run the loop; coordinate agents | LangChain / LangGraph agent loop; deepagents `task` tool for (parallel) subagents; shared virtual filesystem for notes |
-| **Guardrails** | Keep autonomy safe | Gates before approval, change critic, human-in-the-loop, verification after every fix, read-only SQL without access to hidden state, tool-call caps, Jev injection flag, injection-aware prompts |
-| **Fast decisions (System One)** | Typed, calibrated classification | Jev: team, impact, urgency, injection, with a confidence each |
+| **Guardrails** | Keep autonomy safe | Gates before approval, change critic, human-in-the-loop, verification after every fix, read-only SQL without access to hidden state, tool-call caps, triage injection flag, injection-aware prompts |
+| **Typed decisions** | Structured classification | triage_tickets: team, impact, urgency, injection, with a confidence each |
 
 ## 7. Agentic AI: key characteristics
 
@@ -158,7 +158,7 @@ limit), cost and latency (small subagent contexts, skills loaded only on demand)
 | 1. Components | `tests/test_mcp_server.py` | none | Tool logic is correct. SQL is read-only. The environment has realistic cause and effect. Tools work over the **real MCP protocol**. |
 | | `tests/test_simulation.py` | none | Scenarios are consistent; hidden state is unreadable; history shows the change before the symptoms; a restart masks and relapses, a rollback fixes; the red herring is harmless; blast radius, verdicts and todo seeding are correct. |
 | | `tests/test_real_tools.py` | none | Internet tools handle up, down and unknown cases (network mocked). A live check hits real GitHub, DNS and TLS. |
-| | `tests/test_jev.py` | **fake Jev client** | Priority matrix is code. One Jev request returns four typed answers. No personal data is sent. Low confidence or injection goes to human review. LLM fallback works. Tool reads tickets via MCP and rejects bad ids. |
+| | `tests/test_triage.py` | **scripted LLM** | Priority matrix is code. Structured output maps to team/impact/urgency. Low confidence or injection goes to human review. Tool reads tickets via MCP, rejects bad ids and never crashes the run. |
 | | `tests/test_skills.py` | none | Skills are discoverable; only descriptions go in the prompt, and the full text loads on demand. |
 | 2. Agent behaviour | `tests/test_agent.py`, `tests/test_app.py` | **scripted fake** | The real LangChain graph with real MCP: the plan is streamed before any tool runs, subagent steps are streamed, write actions **pause until approved**, tool-call caps stop runaway subagents, simple questions use one direct tool, rejected actions never run, skills load on demand, memory works within a thread, injection cannot bypass approval, and the UI flow works (plan, steps, approval card, answer). |
 | | `tests/test_memory.py` | **scripted fake** | Memory survives a restart; poisoned, oversized and duplicate writes are refused; lessons are capped; parallel writes keep every lesson; incidents are found by relevance. In the agent: nothing is remembered before approval; an approved lesson reaches the planner and executor of *other open sessions*; `it_diagnostics` reuses a past incident; the fix and the memory write are approved separately. |
@@ -177,7 +177,7 @@ Testing a non-deterministic system:
 - The IT system is simulated. A ServiceNow or Jira MCP server would plug in with no agent changes; verification
   would then observe real metrics over wall-clock time instead of advancing a simulated clock.
 - Next agentic steps: `edit` decisions on the approval card, risk-tiered approvals, an `ask_human` tool, and
-  budgets sized per request by Jev.
+  budgets sized per request by triage.
 - Long-term memory: move incident search to a store with an embedding index (semantic search) as history grows;
-  per-operator memory once the UI has sign-in; feed triage corrections back into Jev's LLM fallback.
+  per-operator memory once the UI has sign-in; feed triage corrections back into the triage prompt.
 - Tracing with LangSmith, and CI running levels 1–2 on every commit.

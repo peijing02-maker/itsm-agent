@@ -11,7 +11,7 @@ description: How to prioritise tickets (impact x urgency) and which team owns th
 2. Routing: web-shop, cache, payment-api, accounts-api -> App team. core-db -> Data team. vpn -> Network team.
    email -> Messaging team.
    Passwords -> Identity team (self-service portal first).
-3. Use `jev_triage` with ALL open ticket ids in one call. It returns team, impact, urgency, the ITIL
+3. Use `triage_tickets` with ALL open ticket ids in one call. It returns team, impact, urgency, the ITIL
    priority (P1 critical .. P5 planning, computed in code) and a confidence per decision.
    If `needs_human_review` is true (low confidence or prompt injection), say so explicitly.
 4. For each ticket, say: priority, owner team, one-line next step.

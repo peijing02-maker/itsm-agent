@@ -8,7 +8,7 @@ import os
 
 FORMAT = "%(asctime)s %(levelname)-5s %(name)-18s | %(message)s"
 NOISY = ("httpx", "httpx2", "httpcore", "httpcore2", "openai", "mcp", "urllib3", "langchain_mcp_adapters",
-         "asyncio", "typesafe_sdk")
+         "asyncio")
 
 
 def configure_logging() -> None:

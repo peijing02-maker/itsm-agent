@@ -4,7 +4,7 @@ description: How to run a major incident (several tickets or services failing at
 ---
 # Major incident
 
-1. **Scope**: list open tickets and triage them with `jev_triage` (one call). Group the ones that share the
+1. **Scope**: list open tickets and triage them with `triage_tickets` (one call). Group the ones that share the
    failing services or started at the same time. Leave unrelated tickets out of the incident.
 2. **Parent ticket**: create one parent ticket for the incident and link the grouped tickets to it.
 3. **Investigate in parallel** (two `task` calls in one step): `it_diagnostics` follows the dependency chain
