@@ -1,4 +1,4 @@
-"""Level 1 - the dynamic environment (scenarios, faults, clock) and the pure control/planning logic."""
+"""Level 1 - the dynamic environment (world, faults, clock) and the pure control/planning logic."""
 
 from pathlib import Path
 
@@ -7,29 +7,41 @@ import pytest
 from agent.control import blast_radius, judge
 from agent.planning import MIN_STEPS_FOR_TODOS, plan_steps, seed_todos
 from mcp_server import server
-from mcp_server.database import reset_database
-from mcp_server.scenarios import SCENARIOS
+from mcp_server.database import reset_database, seeded_world
+from mcp_server.world import DEMO_WORLD, World
+from tests.worlds import CACHE_OUTAGE
 
 
 def statuses() -> dict[str, str]:
     return {r["name"]: r["status"] for r in server.run_sql("SELECT name, status FROM services")}
 
 
-# ------------------------------------------------------------------ scenarios
-@pytest.mark.parametrize("name", sorted(SCENARIOS))
-def test_every_scenario_is_consistent(name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(server, "DEFAULT_DB", reset_database(tmp_path / "s.db", scenario=name))
-    sc = SCENARIOS[name]
-    names = {s.name for s in sc.services}
-    assert all(set(s.depends_on) <= names for s in sc.services)  # no dangling dependency
-    assert all(set(f.effects) <= names for f in sc.faults)
-    assert {c[0] for c in sc.changes} == {c["id"] for c in server.list_changes(hours=48)}
-    assert {svc for f in sc.faults for svc in f.effects} == {n for n, st in statuses().items() if st != "healthy"}
+# ---------------------------------------------------------------------- worlds
+@pytest.mark.parametrize("world", [DEMO_WORLD, CACHE_OUTAGE], ids=lambda w: w.name)
+def test_every_world_is_consistent(world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = reset_database(tmp_path / "s.db", world=world)
+    monkeypatch.setattr(server, "DEFAULT_DB", path)
+    assert seeded_world(path) == world.name
+    names = {s.name for s in world.services}
+    assert all(set(s.depends_on) <= names for s in world.services)  # no dangling dependency
+    assert all(set(f.effects) <= names for f in world.faults)
+    assert all(t[6] is None or t[6] in names for t in world.tickets)
+    assert {c[0] for c in world.changes} == {c["id"] for c in server.list_changes(hours=48)}
+    assert {svc for f in world.faults for svc in f.effects} == {n for n, st in statuses().items() if st != "healthy"}
 
 
-def test_unknown_scenario_is_refused(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="unknown scenario"):
-        reset_database(tmp_path / "x.db", scenario="nope")
+def test_reset_undoes_everything_the_agent_changed(incident_db: Path) -> None:
+    server.rollback_change("CHG-231", "retry storm")
+    server.observe_services(5)
+    server.update_ticket("T-101", "resolved", "fixed")
+    server.create_ticket("Major incident", "core-db exhausted", "high")
+    server.page_team("data-team", "sev1", "core-db")
+    reset_database(incident_db)
+    assert {r["status"] for r in server.run_sql("SELECT status FROM changes")} == {"applied"}
+    assert server.get_ticket("T-101")["status"] == "open" and len(server.list_tickets()) == len(DEMO_WORLD.tickets)
+    for table in ("audit_log", "pages"):
+        assert server.run_sql(f"SELECT COUNT(*) n FROM {table}")[0]["n"] == 0
+    assert statuses()["core-db"] == "degraded"  # the fault is back
 
 
 def test_hidden_simulation_state_is_not_readable(incident_db: Path) -> None:
@@ -39,7 +51,7 @@ def test_hidden_simulation_state_is_not_readable(incident_db: Path) -> None:
             server.run_sql(query)
 
 
-# ---------------------------------------------------------- major incident world
+# ------------------------------------------------------------------ demo world
 def test_metric_history_shows_when_the_symptoms_started(incident_db: Path) -> None:
     history = server.get_metrics("core-db", minutes=60)
     first_bad = next(h["ts"] for h in history if h["status"] != "healthy")
@@ -84,11 +96,11 @@ def test_flush_only_works_on_a_cache(db: Path) -> None:
 def test_incident_tickets_and_pages(incident_db: Path) -> None:
     parent = server.create_ticket("Major incident: checkout, payments, login", "core-db exhausted", "high",
                                   "core-db")
-    assert parent["id"] == "T-206" and parent["requester"] == "service-desk-agent"
-    server.link_tickets("T-206", ["T-201", "T-202", "T-203"])
-    assert [t["id"] for t in server.list_tickets() if t["parent_id"] == "T-206"] == ["T-201", "T-202", "T-203"]
+    assert parent["id"] == "T-109" and parent["requester"] == "service-desk-agent"
+    server.link_tickets("T-109", ["T-101", "T-102", "T-103"])
+    assert [t["id"] for t in server.list_tickets() if t["parent_id"] == "T-109"] == ["T-101", "T-102", "T-103"]
     assert server.page_team("data-team", "sev1", "core-db connections exhausted")["paged"] == "data-team"
-    for bad in [lambda: server.page_team("nobody", "sev1", "x"), lambda: server.link_tickets("T-201", ["T-201"]),
+    for bad in [lambda: server.page_team("nobody", "sev1", "x"), lambda: server.link_tickets("T-101", ["T-101"]),
                 lambda: server.create_ticket("x", "y", "urgent")]:
         with pytest.raises(ValueError):
             bad()

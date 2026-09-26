@@ -17,7 +17,7 @@ from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, Field
 
 from agent.mcp_utils import mcp_json
-from mcp_server.scenarios import TEAMS
+from mcp_server.world import TEAMS
 
 log = logging.getLogger("itsm.triage")
 

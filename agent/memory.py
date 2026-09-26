@@ -44,7 +44,7 @@ MAX_LESSONS = 30  # every lesson is in every prompt
 MAX_FIELD_CHARS = 600
 LESSONS_HEADER = "# Service desk lessons\n\nStanding rules learned from human feedback. Each was approved by a human.\n"
 
-# Instructions aimed at an AI rather than facts about IT systems (same threat as ticket T-104).
+# Instructions aimed at an AI rather than facts about IT systems (same threat as ticket T-108).
 _INJECTION = re.compile(
     r"(?i)\b(ignore|disregard|forget|override)\b.{0,40}\b(instructions?|rules|prompt|guardrails?)\b"
     r"|\b(skip|bypass|without)\b.{0,20}\bapprovals?\b|\bsystem prompt\b|\byou are now\b"

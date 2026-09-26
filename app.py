@@ -15,29 +15,21 @@ from dotenv import load_dotenv
 from agent.agent import ServiceDeskAgent, Step
 from agent.logging_config import configure_logging
 from agent.skills import load_all
-from mcp_server.database import DEFAULT_DB, connect, current_scenario, reset_database
-from mcp_server.scenarios import SCENARIOS
+from mcp_server.database import connect, reset_database, seeded_world
+from mcp_server.world import DEMO_WORLD
 
 load_dotenv()
 configure_logging()
 st.set_page_config(page_title="IT Service Desk Agent", page_icon="🛠️", layout="wide")
 
-EXAMPLES = {
-    "cache-outage": [
-        "Triage all open tickets.",
-        "Investigate T-101, fix the root cause and resolve it.",
-        "Users say GitHub is down. Is it us or them?",
-        "Check the TLS certificate and DNS of openai.com.",
-        "Handle T-104.",
-    ],
-    "major-incident": [
-        "Triage all open tickets.",
-        ("Checkout, payments and logins are failing. Run this as a major incident: find the root cause, fix it "
-         "and resolve the related tickets."),
-        "What changed in the last hour, and could it explain the errors?",
-        "Is Cloudflare having an outage, or is it us?",
-    ],
-}
+EXAMPLES = [
+    "Triage all open tickets.",
+    ("Checkout, payments and logins are failing. Run this as a major incident: find the root cause, fix it "
+     "and resolve the related tickets."),
+    "What changed in the last hour, and could it explain the errors?",
+    "Users say GitHub is down. Is it us or them?",
+    "Handle T-108.",
+]
 LABELS = {"it_diagnostics": "🕵️ subagent", "change_analyst": "🔀 subagent", "internet_checker": "🌐 subagent",
           "load_skill": "📘 skill", "triage_tickets": "⚡ triage",
           "get_ticket": "🔎 MCP read", "list_tickets": "🔎 MCP read", "check_service": "🔎 MCP read",
@@ -124,8 +116,8 @@ def pending(steps: list[Step]) -> list[Step]:
 if not os.getenv("OPENAI_API_KEY"):
     st.error("OPENAI_API_KEY is not set. Copy `.env.example` to `.env`, add your key, and restart.")
     st.stop()
-if current_scenario() is None:  # missing, or created by an older version without scenarios
-    reset_database()
+
+
 def new_chat() -> None:
     """Start a new conversation: fresh short-term memory (thread), same agent and long-term memory."""
     st.session_state.thread = str(uuid.uuid4())
@@ -133,10 +125,21 @@ def new_chat() -> None:
     st.session_state.pending = []
 
 
+def reset_demo() -> None:
+    """Start over: the demo world as seeded (undoing every fix, rollback, ticket update and page), no long-term
+    memory (lessons and past incidents would let the agent skip the investigation), and a new chat."""
+    demo_agent: ServiceDeskAgent = st.session_state.agent
+    reset_database(demo_agent.db_path)
+    demo_agent.memory.clear()
+    new_chat()
+
+
 if "agent" not in st.session_state:
     st.session_state.agent = ServiceDeskAgent()
     new_chat()
 agent: ServiceDeskAgent = st.session_state.agent
+if seeded_world(agent.db_path) != DEMO_WORLD.name:  # missing, or seeded by an older version
+    reset_database(agent.db_path)
 
 # ------------------------------------------------------------------ sidebar
 with st.sidebar:
@@ -144,16 +147,10 @@ with st.sidebar:
     st.caption(f"LangChain · plan-and-execute · model `{os.getenv('OPENAI_MODEL', 'gpt-5.5')}`")
     st.button("➕ New chat", on_click=new_chat, type="primary", use_container_width=True,
               help="Start a new conversation. Long-term memory (lessons, past incidents) carries over.")
+    st.button("↺ Reset demo", on_click=reset_demo, use_container_width=True,
+              help="Undo everything: services, changes, tickets, pages and the audit log go back to the start, "
+                   "long-term memory is cleared, and a new chat begins.")
     st.caption(f"Chat `{st.session_state.thread[:8]}`")
-    scenario = current_scenario() or "cache-outage"
-    names = sorted(SCENARIOS)
-    chosen = st.selectbox("Scenario", names, index=names.index(scenario),
-                          help="\n\n".join(f"**{n}**: {SCENARIOS[n].description}" for n in names))
-    if st.button("Reset demo data & chat", help="Long-term memory is kept, so you can see the agent reuse it."):
-        reset_database(scenario=chosen)
-        st.session_state.clear()
-        st.rerun()
-    st.caption(f"Loaded: `{scenario}`" + (" (reset to switch)" if chosen != scenario else ""))
     with st.expander("Architecture"):
         st.markdown(
             "1. **Plan** – restate the request, list the steps; multi-step plans become a live checklist\n"
@@ -169,7 +166,7 @@ with st.sidebar:
             "Skills: " + ", ".join(f"`{s}`" for s in load_all())
         )
     st.subheader("Environment (live)")
-    with connect(DEFAULT_DB) as conn:
+    with connect(agent.db_path) as conn:
         st.markdown("**Services**")
         st.dataframe(pd.read_sql("SELECT name, status, cpu_pct, memory_pct, error_rate_pct, owner FROM services",
                                  conn), hide_index=True)
@@ -192,9 +189,6 @@ with st.sidebar:
         st.markdown(lessons or "_None yet. Reject an action with a reason, or ask the agent to remember a rule._")
     with st.expander(f"Past incidents ({len(incidents)})"):
         st.markdown("\n\n---\n\n".join(incidents) or "_None yet. Resolve a verified fix to record one._")
-    if st.button("Clear agent memory"):
-        agent.memory.clear()
-        st.rerun()
 
 # --------------------------------------------------------------------- chat
 st.title("IT Service Desk Agent")
@@ -231,10 +225,8 @@ if st.session_state.pending:
             st.session_state.pending = pending(steps)
             st.rerun()
 else:
-    examples = EXAMPLES.get(current_scenario() or "", [])
-    cols = st.columns(len(examples)) if examples else []
-    clicks = [col.button(ex, use_container_width=True) for col, ex in zip(cols, examples)]
-    prompt = st.chat_input("Describe the problem...") or next((ex for ex, hit in zip(examples, clicks) if hit), None)
+    clicks = [col.button(ex, use_container_width=True) for col, ex in zip(st.columns(len(EXAMPLES)), EXAMPLES)]
+    prompt = st.chat_input("Describe the problem...") or next((ex for ex, hit in zip(EXAMPLES, clicks) if hit), None)
     if prompt:
         st.session_state.history.append(("user", prompt))
         with st.chat_message("user"):

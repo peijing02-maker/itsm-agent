@@ -17,7 +17,7 @@ from mcp.server.fastmcp import FastMCP
 
 from mcp_server import simulation
 from mcp_server.database import DEFAULT_DB, HIDDEN_TABLE_PREFIX, connect, reset_database
-from mcp_server.scenarios import TEAMS
+from mcp_server.world import TEAMS
 
 TICKET_STATUSES = ("open", "in_progress", "resolved")
 TICKET_PRIORITIES = ("low", "medium", "high")

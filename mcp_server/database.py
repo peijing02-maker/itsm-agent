@@ -2,7 +2,7 @@
 
 Visible tables: tickets, services (health + dependencies + owner), knowledge_base, audit_log, changes,
 metrics_history, service_logs, pages. Hidden tables (`sim_*`): the clock, the faults and the services' healthy
-baselines that drive the simulation (see simulation.py). The seed data comes from a scenario (scenarios.py).
+baselines that drive the simulation (see simulation.py). The seed data comes from the demo world (world.py).
 """
 
 import json
@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from mcp_server import simulation
-from mcp_server.scenarios import DEFAULT_SCENARIO, KNOWLEDGE_BASE, SCENARIOS, Scenario
+from mcp_server.world import DEMO_WORLD, KNOWLEDGE_BASE, World
 
 DEFAULT_DB = Path(os.environ.get("ITSM_DB_PATH", Path(__file__).resolve().parent.parent / "data" / "itsm.db"))
 HIDDEN_TABLE_PREFIX = "sim_"
@@ -70,11 +70,8 @@ def connect(db_path: Path = DEFAULT_DB) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
-def reset_database(db_path: Path = DEFAULT_DB, scenario: str | None = None) -> Path:
-    """(Re)create the database with a scenario's demo data (default: ITSM_SCENARIO, else cache-outage)."""
-    name = scenario or os.getenv("ITSM_SCENARIO", DEFAULT_SCENARIO)
-    if name not in SCENARIOS:
-        raise ValueError(f"unknown scenario '{name}'. Known: {sorted(SCENARIOS)}")
+def reset_database(db_path: Path = DEFAULT_DB, world: World = DEMO_WORLD) -> Path:
+    """(Re)create the database with a world's seed data. Everything the agent changed is discarded."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with connect(db_path) as conn:
         # Drop and recreate in place rather than deleting the file: Windows refuses to delete a file that another
@@ -84,57 +81,57 @@ def reset_database(db_path: Path = DEFAULT_DB, scenario: str | None = None) -> P
         for table in tables:
             conn.execute(f'DROP TABLE "{table}"')
         conn.executescript(SCHEMA)
-        _seed(conn, SCENARIOS[name], datetime.now(UTC).replace(microsecond=0))
+        _seed(conn, world, datetime.now(UTC).replace(microsecond=0))
     return db_path
 
 
-def current_scenario(db_path: Path = DEFAULT_DB) -> str | None:
-    """The scenario the database was seeded with (None if it does not exist or predates scenarios)."""
+def seeded_world(db_path: Path = DEFAULT_DB) -> str | None:
+    """The name of the world the database was seeded with (None if it does not exist or predates worlds)."""
     if not db_path.exists():
         return None
     with connect(db_path) as conn:
         try:
-            row = conn.execute("SELECT value FROM sim_meta WHERE key = 'scenario'").fetchone()
+            row = conn.execute("SELECT value FROM sim_meta WHERE key = 'world'").fetchone()
         except sqlite3.OperationalError:
             return None
     return row[0] if row else None
 
 
-def _seed(conn: sqlite3.Connection, sc: Scenario, start: datetime) -> None:
+def _seed(conn: sqlite3.Connection, world: World, start: datetime) -> None:
     def ago(minutes: int) -> str:
         return simulation.fmt(start - timedelta(minutes=minutes))
 
     conn.execute("INSERT INTO sim_clock VALUES (?)", (simulation.fmt(start),))
-    conn.execute("INSERT INTO sim_meta VALUES ('scenario', ?)", (sc.name,))
+    conn.execute("INSERT INTO sim_meta VALUES ('world', ?)", (world.name,))
     conn.executemany("INSERT INTO sim_baseline VALUES (?,?,?,?)",
-                     [(s.name, s.cpu_pct, s.memory_pct, s.error_rate_pct) for s in sc.services])
+                     [(s.name, s.cpu_pct, s.memory_pct, s.error_rate_pct) for s in world.services])
     conn.executemany(
         "INSERT INTO services (name, depends_on, owner, kind) VALUES (?,?,?,?)",
-        [(s.name, ",".join(s.depends_on) or None, s.owner, s.kind) for s in sc.services],
+        [(s.name, ",".join(s.depends_on) or None, s.owner, s.kind) for s in world.services],
     )
     conn.executemany(
         "INSERT INTO sim_faults VALUES (?,?,?,?, 'active', NULL, ?)",
         [(f.id, json.dumps(f.fixed_by), json.dumps(f.masked_by), f.relapse_minutes, json.dumps(f.effects))
-         for f in sc.faults],
+         for f in world.faults],
     )
     conn.executemany("INSERT INTO tickets (id, title, description, requester, priority, status, service) "
-                     "VALUES (?,?,?,?,?,?,?)", sc.tickets)
-    conn.executemany("INSERT INTO knowledge_base VALUES (?,?,?)", KNOWLEDGE_BASE + sc.extra_kb)
+                     "VALUES (?,?,?,?,?,?,?)", world.tickets)
+    conn.executemany("INSERT INTO knowledge_base VALUES (?,?,?)", KNOWLEDGE_BASE + world.extra_kb)
     conn.executemany("INSERT INTO changes VALUES (?,?,?,?,?,?, 'applied')",
-                     [(cid, ago(m), svc, kind, summary, author) for cid, m, svc, kind, summary, author in sc.changes])
+                     [(cid, ago(m), svc, kind, summary, author) for cid, m, svc, kind, summary, author in world.changes])
     conn.executemany("INSERT INTO service_logs VALUES (?,?,?,?)",
-                     [(ago(m), svc, level, msg) for m, svc, level, msg in sc.logs])
-    _seed_metrics(conn, sc, ago)
+                     [(ago(m), svc, level, msg) for m, svc, level, msg in world.logs])
+    _seed_metrics(conn, world, ago)
     simulation.recompute(conn)
 
 
-def _seed_metrics(conn: sqlite3.Connection, sc: Scenario, ago: Callable[[int], str]) -> None:
+def _seed_metrics(conn: sqlite3.Connection, world: World, ago: Callable[[int], str]) -> None:
     """Metric history consistent with the faults: baseline before each fault started, symptoms after."""
     baselines = {s.name: {"cpu_pct": s.cpu_pct, "memory_pct": s.memory_pct, "error_rate_pct": s.error_rate_pct}
-                 for s in sc.services}
+                 for s in world.services}
     rows = []
     for i, minutes in enumerate(range(HISTORY_MINUTES, 0, -HISTORY_STEP)):
-        active = [f.effects for f in sc.faults if f.started_minutes_ago >= minutes]
+        active = [f.effects for f in world.faults if f.started_minutes_ago >= minutes]
         for name, h in simulation.view(baselines, active).items():
             rows.append((ago(minutes), name, h["status"],
                          *(simulation.jitter(h[m], name, i) for m in simulation.METRICS)))

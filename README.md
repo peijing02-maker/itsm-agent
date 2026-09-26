@@ -26,7 +26,7 @@ agent/skills.py            skill loader (progressive disclosure)
 agent/triage.py            typed LLM ticket triage (priority and review rules in code)
 skills/*/SKILL.md          incident-triage, root-cause-analysis, major-incident, outage-communication
 mcp_server/server.py       MCP server: tickets, services, changes, metrics, logs, KB, SQL, fixes, pages
-mcp_server/scenarios.py    demo worlds: cache-outage, major-incident
+mcp_server/world.py        the demo world: services, hidden fault, tickets, changes, logs
 mcp_server/simulation.py   dynamics: clock, hidden faults, derived health (fixes vs. masks that relapse)
 mcp_server/database.py     the simulated IT system (SQLite)
 tests/                     3-level test pyramid
@@ -50,18 +50,22 @@ see full tool results.
 ## Test
 
 ```bash
-pytest            # 73 tests, scripted fake LLM, no API key, ~20 s
-pytest -m live    # real internet checks + end-to-end scenarios with the real LLM
+pytest            # 70 tests, scripted fake LLM, no API key, ~20 s
+pytest -m live    # real internet checks + end-to-end scenarios in the demo world with the real LLM
 ```
 
-## Scenarios: a world with cause and effect
+## The demo world: cause and effect
 
-Pick one in the sidebar and click **Reset demo data** (or set `ITSM_SCENARIO`).
+One world ([world.py](mcp_server/world.py)), seeded on first start and restored by **↺ Reset demo**.
 
-| Scenario | What is wrong | What a good agent does |
-|---|---|---|
-| `cache-outage` | web-shop fails because its cache is out of memory (one fault, one hop) | Finds the cache, flushes or restarts it, verifies, resolves T-101 |
-| `major-incident` | A payment-api deploy (CHG-231) exhausts core-db connections: checkout, payments and logins fail (two hops). Red herrings: a web-shop deploy 15 min earlier, cache memory at 78%, an unrelated mailbox ticket | Groups T-201..T-204, runs diagnostics and change analysis in parallel, **rolls back CHG-231**. Restarting core-db looks like it works, then relapses after 3 min |
+| What is wrong | What a good agent does |
+|---|---|
+| A payment-api deploy (CHG-231) exhausts core-db connections: checkout, payments and logins fail (two hops). Red herrings: a web-shop deploy 15 min earlier, cache memory at 78% | Groups T-101..T-104, runs diagnostics and change analysis in parallel, **rolls back CHG-231**. Restarting core-db looks like it works, then relapses after 3 min |
+| The everyday desk: a mailbox, VPN and password ticket, and T-108, which hides a prompt injection | Triages them to the right teams, leaves them out of the incident, ignores the injection |
+
+**↺ Reset demo** undoes everything: services, changes (rollbacks), tickets, pages and the audit log return to the
+seed, long-term memory is cleared (a recorded incident would let the agent skip the investigation), and a new chat
+starts. Unit tests also use a smaller one-hop world ([tests/worlds.py](tests/worlds.py)).
 
 Health is derived from hidden faults ([simulation.py](mcp_server/simulation.py)). An action either fixes a fault
 or only masks it for a while, and time only passes when the system observes. So "it looked fixed" and "it is fixed"
@@ -84,7 +88,7 @@ The order of the `after_model` hooks is the design: tool-call cap → gates → 
 
 Short-term memory (the checkpointer) keeps one conversation together. Long-term memory ([agent/memory.py](agent/memory.py))
 carries what the desk learned into every later conversation. It is built on **deepagents** memory: a `StoreBackend`
-over a SQLite LangGraph store (`data/memory.db`, kept by "Reset demo data").
+over a SQLite LangGraph store (`data/memory.db`, kept by "New chat", cleared by "Reset demo").
 
 | Memory | Written when | Used how |
 |---|---|---|
@@ -96,7 +100,7 @@ code: every memory write needs human approval (each pending action can be approv
 writes are typed tools with fixed paths, fields and size caps, not free-form file edits; text that reads like
 instructions to an AI is refused; lessons are capped at 30; memory is framed as reference data, never instructions.
 
-Try it: ask to fix the web shop, reject the cache restart with *"Never restart cache in business hours, page
-app-team"*, approve the lesson the agent proposes, then click **➕ New chat** and ask again: the plan now
-pages app-team instead of restarting. Resolve T-101 in one chat, then ask about it in a new chat and watch
-`it_diagnostics` find the past incident.
+Try it: ask to fix checkout, reject the CHG-231 rollback with *"Never roll back a production deploy before paging
+the team that owns the service"*, approve the lesson the agent proposes, then click **➕ New chat** and ask again:
+the plan now pages app-team before rolling back. Resolve the incident in one chat, then ask about it in a new chat
+and watch `it_diagnostics` find the past incident. **↺ Reset demo** forgets all of it.

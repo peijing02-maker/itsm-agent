@@ -2,8 +2,8 @@
 
 ## 1. What I built
 
-An **IT Service Desk agent** built with LangChain. You give it a goal ("Investigate T-101, fix the root cause
-and resolve it") and it works autonomously:
+An **IT Service Desk agent** built with LangChain. You give it a goal ("Checkout, payments and logins are
+failing. Run this as a major incident") and it works autonomously:
 
 - it delegates investigation to specialist **subagents**;
 - it reads internal IT systems through an **MCP server**;
@@ -50,7 +50,7 @@ and resolve it") and it works autonomously:
 | **Plan as state** | Multi-step plans become a todo list the agent revises (`write_todos`); the UI shows every version | `agent/planning.py` |
 | **Parallel subagents** | deepagents `task` tool; `it_diagnostics` and `change_analyst` run at the same time, each step attributed exactly | `agent/subagents.py` |
 | **Closed-loop control** | Gates before approval, a change critic, and verification in code after every fix; a failed fix forces a replan | `agent/control.py`, `agent/critic.py` |
-| **Dynamic environment** | Hidden faults, a clock, change log, metric history, logs; fixes vs. masks that relapse | `mcp_server/simulation.py`, `mcp_server/scenarios.py` |
+| **Dynamic environment** | Hidden faults, a clock, change log, metric history, logs; fixes vs. masks that relapse | `mcp_server/simulation.py`, `mcp_server/world.py` |
 | **Transparency (plan-and-execute)** | The user sees the understanding and plan within ~1.5 s, then every step live | `astream_chat` in `agent/agent.py`, `stream_turn` in `app.py` |
 
 ## 4. Demo script (5–7 minutes)
@@ -59,13 +59,17 @@ In every demo, the agent first streams **how it understood the request and its p
 appears live, with subagent calls indented under the subagent that made them.
 
 1. **"Triage all open tickets."** The agent loads the `incident-triage` skill, delegates to `it_diagnostics`, and
-   returns priorities and owners. It flags T-104 as a prompt injection.
-2. **"Investigate T-101, fix the root cause and resolve it."** This is the main demo:
-   - The plan appears first. Then `it_diagnostics` finds that web-shop depends on cache, and cache memory is at 97%.
-   - It loads the `root-cause-analysis` skill, which says to restart the root cause and not the symptom.
-   - It asks to run `restart_service(cache)`. **An approval card appears**, and I approve.
-   - It verifies the fix, then asks to run `update_ticket(T-101, resolved)`, and I approve.
-   - The sidebar shows services, tickets and the audit log changing live.
+   returns priorities and owners. It flags T-108 as a prompt injection.
+2. **"Checkout, payments and logins are failing. Run this as a major incident: find the root cause, fix it and
+   resolve the related tickets."** This is the main demo:
+   - The plan appears first and becomes a live checklist. It loads the `major-incident` skill.
+   - `it_diagnostics` and `change_analyst` run in parallel: core-db's connection pool is exhausted, and
+     payment-api deploy CHG-231 landed two minutes before the symptoms. The cache at 78% and the web-shop deploy
+     are red herrings.
+   - It asks to run `rollback_change(CHG-231)`. **An approval card appears** with the change critic's verdict,
+     and I approve. (If I approve a core-db restart instead, verification catches the relapse and forces a new plan.)
+   - It verifies the fix, then asks to resolve T-101..T-104 and leaves the unrelated tickets open.
+   - The sidebar shows services, changes, tickets and the audit log changing live. **↺ Reset demo** starts over.
 3. **"Users say GitHub is down. Is it us or them?"** `internet_checker` checks the real githubstatus.com,
    website reachability and DNS. These are live results.
 4. **"Check the TLS certificate and DNS of openai.com."** Real certificate expiry and real IP addresses.
@@ -76,9 +80,10 @@ appears live, with subagent calls indented under the subagent that made them.
 1. **Pick a domain where agents add value.** Service-desk work is multi-step (read, investigate, act, verify) and
    mixes internal systems with the outside world, and mistakes are costly. That makes it a good fit for
    autonomy plus guardrails.
-2. **Environment first.** A small simulated IT system with *cause and effect*: web-shop fails because the cache is
-   full. Restarting web-shop doesn't help; restarting the cache fixes both. This tests reasoning, not only tool
-   calling.
+2. **Environment first.** A small simulated IT system with *cause and effect*: a payment-api deploy exhausts
+   core-db's connections, so checkout, payments and logins fail. Restarting a symptom doesn't help, restarting
+   core-db only masks it for 3 minutes, rolling back the deploy fixes everything. This tests reasoning, not only
+   tool calling.
 3. **Expose the environment through MCP.** Tools become a reusable, standard interface instead of being tied to
    one framework.
 4. **Split responsibilities.**
@@ -92,13 +97,13 @@ appears live, with subagent calls indented under the subagent that made them.
 
 Flow of one request (plan-and-execute; everything streams to the UI as it happens):
 ```
-user goal → PLANNER streams: "You're asking about T-101... To do this, I need to: 1. ... 2. ..."  (~1.5 s)
-          → the plan is added to the conversation, and the EXECUTOR agent follows it:
-          → load_skill(root-cause-analysis)
-          → it_diagnostics subagent ──► MCP: get_ticket, check_service ×2, search_knowledge_base → report
-          → restart_service(cache)  ──► gates ──► change critic ──► PAUSE ──► human approves ──► MCP executes
-          → VERIFICATION in code: cache, web-shop, payment-api watched 5 min → PASSED
-          → update_ticket(resolved) ──► gate: web-shop healthy? ──► PAUSE ──► approve
+user goal → PLANNER streams: "You're asking me to run a major incident... I need to: 1. ... 2. ..."  (~1.5 s)
+          → the plan becomes a todo list, and the EXECUTOR agent follows it:
+          → load_skill(major-incident)
+          → it_diagnostics ║ change_analyst (parallel) ──► MCP: check_service, get_logs, list_changes → reports
+          → rollback_change(CHG-231) ──► gates ──► change critic ──► PAUSE ──► human approves ──► MCP executes
+          → VERIFICATION in code: core-db and every connected service watched 5 min → PASSED
+          → update_ticket(T-101..T-104, resolved) ──► gate: services healthy? ──► PAUSE ──► approve
           → final answer: findings, actions, evidence
 ```
 
@@ -130,7 +135,7 @@ What changed:
 |---|---|---|
 | **LLM (brain)** | Reasons, plans, chooses the next action | OpenAI model via `init_chat_model` |
 | **Tools (actions)** | Act on the environment | MCP tools + real internet tools |
-| **Environment** | The world the agent perceives and changes | SQLite IT system with hidden faults and a clock (scenarios), + the internet |
+| **Environment** | The world the agent perceives and changes | SQLite IT system with hidden faults and a clock (the demo world), + the internet |
 | **Planning** | Break goals into steps | Explicit planner step (plan-and-execute), shown to the user first; its steps become a todo list the agent revises (`write_todos`), forced after a failed fix |
 | **Memory** | Keep context, learn | Short-term: checkpointer per thread. Long-term (deepagents `StoreBackend` + `MemoryMiddleware`): human-approved lessons in every prompt, past incidents searched on demand. Plus skills and the knowledge base |
 | **Orchestration** | Run the loop; coordinate agents | LangChain / LangGraph agent loop; deepagents `task` tool for (parallel) subagents; shared virtual filesystem for notes |

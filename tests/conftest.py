@@ -1,4 +1,4 @@
-"""Shared fixtures: a fresh demo database and a scripted fake LLM (no network, no API key)."""
+"""Shared fixtures: fresh world databases and a scripted fake LLM (no network, no API key)."""
 
 import itertools
 from collections.abc import Sequence
@@ -13,6 +13,7 @@ from pydantic import PrivateAttr
 
 import mcp_server.server as server
 from mcp_server.database import reset_database
+from tests.worlds import CACHE_OUTAGE
 
 _ids = itertools.count(1)
 
@@ -92,7 +93,8 @@ def memory_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 @pytest.fixture
 def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    path = reset_database(tmp_path / "itsm.db", scenario="cache-outage")  # pinned: ignore ITSM_SCENARIO
+    """The minimal test world (tests/worlds.py): web-shop fails because the cache is out of memory."""
+    path = reset_database(tmp_path / "itsm.db", world=CACHE_OUTAGE)
     monkeypatch.setattr(server, "DEFAULT_DB", path)  # in-process calls
     monkeypatch.setenv("ITSM_DB_PATH", str(path))  # MCP subprocess
     return path
@@ -100,8 +102,8 @@ def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 @pytest.fixture
 def incident_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """The major-incident scenario: payment-api deploy CHG-231 exhausts core-db connections."""
-    path = reset_database(tmp_path / "itsm.db", scenario="major-incident")
+    """The demo world the app runs: payment-api deploy CHG-231 exhausts core-db connections."""
+    path = reset_database(tmp_path / "itsm.db")
     monkeypatch.setattr(server, "DEFAULT_DB", path)
     monkeypatch.setenv("ITSM_DB_PATH", str(path))
     return path
