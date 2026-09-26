@@ -23,12 +23,29 @@ AGENT_MARKERS = {
     "lead IT Service Desk agent": "main",
     "IT diagnostics specialist": "it_diagnostics",
     "internet checker": "internet_checker",
+    "change analyst": "change_analyst",
+    "change critic": "critic",
 }
 
 
 def call(name: str, /, **args: Any) -> AIMessage:
     """Scripted LLM turn that calls one tool."""
     return AIMessage(content="", tool_calls=[{"name": name, "args": args, "id": f"c{next(_ids)}", "type": "tool_call"}])
+
+
+def delegate(subagent: str, task: str) -> AIMessage:
+    """Scripted LLM turn that delegates to a subagent through the `task` tool."""
+    return call("task", subagent_type=subagent, description=task)
+
+
+def together(*turns: AIMessage) -> AIMessage:
+    """Scripted LLM turn that makes several tool calls in one step (they run in parallel)."""
+    return AIMessage(content="", tool_calls=[tc for t in turns for tc in t.tool_calls])
+
+
+def verdict(value: str, reason: str) -> AIMessage:
+    """Scripted change-critic answer (structured output arrives as a tool call)."""
+    return call("CriticVerdict", verdict=value, reason=reason)
 
 
 def say(text: str) -> AIMessage:
@@ -75,7 +92,16 @@ def memory_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 @pytest.fixture
 def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    path = reset_database(tmp_path / "itsm.db")
+    path = reset_database(tmp_path / "itsm.db", scenario="cache-outage")  # pinned: ignore ITSM_SCENARIO
     monkeypatch.setattr(server, "DEFAULT_DB", path)  # in-process calls
     monkeypatch.setenv("ITSM_DB_PATH", str(path))  # MCP subprocess
+    return path
+
+
+@pytest.fixture
+def incident_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The major-incident scenario: payment-api deploy CHG-231 exhausts core-db connections."""
+    path = reset_database(tmp_path / "itsm.db", scenario="major-incident")
+    monkeypatch.setattr(server, "DEFAULT_DB", path)
+    monkeypatch.setenv("ITSM_DB_PATH", str(path))
     return path

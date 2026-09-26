@@ -9,7 +9,7 @@ from langchain_core.messages import AIMessage
 from agent.agent import ServiceDeskAgent
 from agent.memory import MAX_FIELD_CHARS, MAX_LESSONS, AgentMemory
 from mcp_server import server
-from tests.conftest import ScriptedLLM, call, say
+from tests.conftest import ScriptedLLM, call, delegate, say
 
 LESSON = "Do not restart cache during business hours; page app-team instead"
 
@@ -100,7 +100,7 @@ async def test_rejected_memory_write_is_not_saved(db: Path) -> None:
 
 async def test_diagnostics_reuses_a_past_incident(db: Path) -> None:
     llm = ScriptedLLM(scripts={
-        "main": [call("it_diagnostics", task="Why is web-shop returning HTTP 500?"), say("Cache again.")],
+        "main": [delegate("it_diagnostics", "Why is web-shop returning HTTP 500?"), say("Cache again.")],
         "it_diagnostics": [call("search_past_incidents", query="web-shop HTTP 500"),
                            call("check_service", service="cache"), say("Same as last time: cache memory.")],
     })
@@ -119,6 +119,7 @@ async def test_fix_and_memory_write_are_decided_separately(db: Path) -> None:
     both = AIMessage(content="", tool_calls=[*resolve.tool_calls, *record.tool_calls])  # one step, one approval
     llm = ScriptedLLM(scripts={"main": [both, say("T-101 resolved.")]})
     agent = ServiceDeskAgent(llm, db)
+    server.restart_service("cache", "fixed earlier")  # a ticket can only be resolved once its service is healthy
     result = await agent.achat("t", "Resolve T-101")
     assert [p["name"] for p in result.pending] == ["update_ticket", "record_incident"]
 

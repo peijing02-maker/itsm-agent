@@ -8,7 +8,8 @@ description: How to prioritise tickets (impact x urgency) and which team owns th
    - **High**: many users or customers affected, or revenue impact (e.g. checkout failing).
    - **Medium**: one user fully blocked (cannot log in, cannot connect).
    - **Low**: inconvenience or a workaround exists (slow email, printer).
-2. Routing: web-shop, cache, payment-api -> App team. vpn -> Network team. email -> Messaging team.
+2. Routing: web-shop, cache, payment-api, accounts-api -> App team. core-db -> Data team. vpn -> Network team.
+   email -> Messaging team.
    Passwords -> Identity team (self-service portal first).
 3. Use `jev_triage` with ALL open ticket ids in one call. It returns team, impact, urgency, the ITIL
    priority (P1 critical .. P5 planning, computed in code) and a confidence per decision.

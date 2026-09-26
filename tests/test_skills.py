@@ -5,7 +5,7 @@ from agent.skills import load_all, load_skill, skills_index
 
 def test_all_skills_have_name_and_description() -> None:
     skills = load_all()
-    assert set(skills) == {"incident-triage", "root-cause-analysis", "outage-communication"}
+    assert set(skills) == {"incident-triage", "root-cause-analysis", "outage-communication", "major-incident"}
     assert all(s["description"] and s["body"] for s in skills.values())
 
 

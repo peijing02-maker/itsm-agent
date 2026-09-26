@@ -22,15 +22,11 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, Field
 
+from agent.mcp_utils import mcp_json
+from mcp_server.scenarios import TEAMS
+
 log = logging.getLogger("itsm.jev")
 
-TEAMS = {
-    "app-team": "Business applications and their services: web-shop, cache, payment-api.",
-    "network-team": "VPN, Wi-Fi, DNS, connectivity.",
-    "messaging-team": "Email and mailboxes.",
-    "identity-team": "Passwords, accounts, login and MFA.",
-    "desktop-team": "Laptops, printers, peripherals.",
-}
 # Rubrics are ordered from score 0 (low) to 2 (high).
 IMPACT = ["One user, or a workaround exists", "A team or some customers", "Many users or customers, or revenue loss"]
 URGENCY = ["Can wait", "User blocked, not time-critical", "Business stopped or revenue lost right now"]
@@ -73,7 +69,7 @@ def finalize(ticket_id: str, team: str, impact: int, urgency: int, injection_p: 
 class _LLMTriage(BaseModel):
     """Fallback schema: the same four questions, with self-reported confidence."""
 
-    team: Literal["app-team", "network-team", "messaging-team", "identity-team", "desktop-team"]
+    team: Literal["app-team", "data-team", "network-team", "messaging-team", "identity-team", "desktop-team"]
     impact: Literal["low", "medium", "high"]
     urgency: Literal["low", "medium", "high"]
     prompt_injection: bool
@@ -150,13 +146,6 @@ class JevClassifier:
                          "urgency": out.urgency_confidence}, "llm-fallback")
 
 
-def _mcp_json(result: Any) -> Any:
-    """MCP tools return content blocks; our server puts JSON in the text."""
-    if isinstance(result, list):
-        result = "".join(b.get("text", "") for b in result if isinstance(b, dict))
-    return json.loads(result)
-
-
 def make_jev_triage_tool(classifier: JevClassifier, get_ticket: BaseTool) -> BaseTool:
     """`jev_triage` tool: reads tickets through MCP and classifies them concurrently."""
 
@@ -165,7 +154,7 @@ def make_jev_triage_tool(classifier: JevClassifier, get_ticket: BaseTool) -> Bas
             if not re.fullmatch(r"T-\d+", ticket_id):
                 return {"ticket_id": ticket_id, "error": "invalid ticket id"}
             try:
-                ticket = _mcp_json(await get_ticket.ainvoke({"ticket_id": ticket_id}))
+                ticket = mcp_json(await get_ticket.ainvoke({"ticket_id": ticket_id}))
             except (ValueError, TypeError):
                 return {"ticket_id": ticket_id, "error": "ticket not found"}
             try:
