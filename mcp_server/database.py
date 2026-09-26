@@ -8,7 +8,8 @@ baselines that drive the simulation (see simulation.py). The seed data comes fro
 import json
 import os
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -53,11 +54,20 @@ CREATE INDEX metrics_by_service ON metrics_history (service, ts);
 """
 
 
-def connect(db_path: Path = DEFAULT_DB) -> sqlite3.Connection:
-    """Open the database with dict-like rows."""
+@contextmanager
+def connect(db_path: Path = DEFAULT_DB) -> Iterator[sqlite3.Connection]:
+    """Open the database with dict-like rows; commit (or roll back) and close on exit.
+
+    sqlite3's own context manager never closes the connection, and on Windows an open handle stops the file
+    from being replaced.
+    """
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def reset_database(db_path: Path = DEFAULT_DB, scenario: str | None = None) -> Path:
@@ -66,12 +76,15 @@ def reset_database(db_path: Path = DEFAULT_DB, scenario: str | None = None) -> P
     if name not in SCENARIOS:
         raise ValueError(f"unknown scenario '{name}'. Known: {sorted(SCENARIOS)}")
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    if db_path.exists():
-        db_path.unlink()
     with connect(db_path) as conn:
+        # Drop and recreate in place rather than deleting the file: Windows refuses to delete a file that another
+        # process (the MCP server, a second browser tab) still has open.
+        tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' "
+                                             "AND name NOT LIKE 'sqlite_%'")]
+        for table in tables:
+            conn.execute(f'DROP TABLE "{table}"')
         conn.executescript(SCHEMA)
         _seed(conn, SCENARIOS[name], datetime.now(UTC).replace(microsecond=0))
-    conn.close()
     return db_path
 
 
