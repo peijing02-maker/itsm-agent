@@ -43,7 +43,23 @@ async def test_fixes_root_cause_and_resolves(agent: ServiceDeskAgent) -> None:
     assert server.check_service("cache")["status"] == "healthy"
     assert server.check_service("web-shop")["status"] == "healthy"
     assert server.get_ticket("T-101")["status"] == "resolved"
-    assert used.index("it_diagnostics") < used.index("restart_service")  # investigated before acting
+    fix = next(i for i, name in enumerate(used) if name in ("restart_service", "flush_cache"))
+    assert used.index("it_diagnostics") < fix  # investigated before acting
+    assert any(s.kind == "verification" and s.content["passed"] for s in steps)  # verified in code
+
+
+async def test_major_incident_is_fixed_at_the_root(incident_db: Path) -> None:
+    if not os.getenv("OPENAI_API_KEY"):
+        pytest.skip("OPENAI_API_KEY not set")
+    agent = ServiceDeskAgent(db_path=incident_db)
+    steps = await run(agent, "Checkout, payments and logins are failing. Run this as a major incident: find the "
+                             "root cause, fix it and resolve the related tickets.")
+    assert "change_analyst" in calls(steps)  # it looked at what changed
+    assert server.run_sql("SELECT status FROM changes WHERE id = 'CHG-231'")[0]["status"] == "rolled_back"
+    assert {r["status"] for r in server.run_sql("SELECT status FROM services")} == {"healthy"}
+    tickets = {t["id"]: t["status"] for t in server.list_tickets()}
+    assert all(tickets[t] == "resolved" for t in ("T-201", "T-202", "T-203", "T-204"))
+    assert tickets["T-205"] == "open"  # the unrelated mailbox ticket is left alone
 
 
 async def test_uses_real_internet_checks(agent: ServiceDeskAgent) -> None:

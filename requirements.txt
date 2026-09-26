@@ -4,7 +4,6 @@ langchain-mcp-adapters>=0.3
 deepagents>=0.7.18,<0.8  # long-term memory; <0.8: we extend its MemoryMiddleware
 langgraph-checkpoint-sqlite>=3.1  # on-disk store for long-term memory
 mcp>=1.20
-typesafe-sdk>=0.7
 streamlit>=1.40
 python-dotenv>=1.0
 pytest>=8.0

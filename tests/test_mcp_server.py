@@ -27,7 +27,7 @@ def test_sql_answers_questions_but_is_read_only(db: Path) -> None:
 
 
 def test_restart_symptom_vs_root_cause(db: Path) -> None:
-    assert "still failing" in server.restart_service("web-shop", "try")["message"]
+    assert "still failing: dependency cache" in server.restart_service("web-shop", "try")["message"]
     assert server.restart_service("cache", "memory 97%")["service_after"]["status"] == "healthy"
     assert server.check_service("web-shop")["status"] == "healthy"  # dependent recovered
     assert [r["target"] for r in server.run_sql("SELECT target FROM audit_log")] == ["web-shop", "cache"]
@@ -41,7 +41,7 @@ def test_update_ticket(db: Path) -> None:
 
 async def test_tools_over_real_mcp_protocol(db: Path) -> None:
     tools = {t.name: t for t in await mcp_client(db).get_tools()}
-    assert set(tools) == set(server.READ_ONLY_TOOLS) | set(server.WRITE_TOOLS)
+    assert set(tools) == {*server.READ_ONLY_TOOLS, *server.WRITE_TOOLS, *server.INTERNAL_TOOLS}
     assert all(t.description for t in tools.values())  # docstrings become tool descriptions
     result = await tools["check_service"].ainvoke({"service": "cache"})
     assert '"memory_pct": 97.0' in str(result)
